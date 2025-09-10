@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Free Route Finder with OpenStreetMap</title>
+
+  <!-- Leaflet CSS -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      background: #f0f0f0;
+      text-align: center;
+      padding: 20px;
+    }
+    input, button {
+      padding: 10px;
+      font-size: 16px;
+      margin: 5px;
+      border-radius: 4px;
+      border: 1px solid #ccc;
+      width: 250px;
+      max-width: 90vw;
+    }
+    button {
+      background-color: #007bff;
+      color: white;
+      border: none;
+      cursor: pointer;
+    }
+    button:hover {
+      background-color: #0056b3;
+    }
+    #map {
+      height: 500px;
+      max-width: 900px;
+      margin: 20px auto;
+      border-radius: 8px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+    }
+    #info {
+      max-width: 900px;
+      margin: 10px auto;
+      text-align: left;
+      background: white;
+      padding: 15px;
+      border-radius: 6px;
+      box-shadow: 0 1px 6px rgba(0,0,0,0.1);
+      font-size: 16px;
+    }
+  </style>
+</head>
+<body>
+
+  <h2>Free Route Finder with OpenStreetMap</h2>
+  <input id="start" placeholder="Starting Point (e.g., New York)" />
+  <input id="end" placeholder="Destination (e.g., Boston)" />
+  <button onclick="calculateRoute()">Get Route</button>
+
+  <div id="info">Enter your start and end locations above, then click <strong>Get Route</strong>.</div>
+  <div id="map"></div>
+
+  <!-- Leaflet JS -->
+  <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+  <script>
+    const map = L.map('map').setView([40.7128, -74.0060], 13); // Default to New York
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '© OpenStreetMap contributors',
+      maxZoom: 19
+    }).addTo(map);
+
+    let routeLayer = null;
+    let startMarker = null;
+    let endMarker = null;
+
+    async function geocode(address) {
+      const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(address)}`;
+      const res = await fetch(url, {
+        headers: { 'Accept': 'application/json' }
+      });
+      const data = await res.json();
+      if (data.length === 0) throw new Error("Address not found: " + address);
+      return {
+        lat: parseFloat(data[0].lat),
+        lon: parseFloat(data[0].lon),
+        display: data[0].display_name
+      };
+    }
+
+    function formatDuration(seconds) {
+      const h = Math.floor(seconds / 3600);
+      const m = Math.floor((seconds % 3600) / 60);
+      const s = Math.floor(seconds % 60);
+      return `${h > 0 ? h + "h " : ""}${m}m ${s}s`;
+    }
+
+    async function calculateRoute() {
+      const startText = document.getElementById('start').value.trim();
+      const endText = document.getElementById('end').value.trim();
+      const info = document.getElementById('info');
+
+      if (!startText || !endText) {
+        alert("Please enter both start and destination addresses.");
+        return;
+      }
+
+      info.innerHTML = "Geocoding locations...";
+
+      try {
+        const start = await geocode(startText);
+        const end = await geocode(endText);
+
+        const osrmUrl = `https://router.project-osrm.org/route/v1/driving/${start.lon},${start.lat};${end.lon},${end.lat}?overview=full&geometries=geojson`;
+
+        const res = await fetch(osrmUrl);
+        const data = await res.json();
+
+        if (!data.routes || data.routes.length === 0) throw new Error("No route found.");
+
+        const route = data.routes[0];
+        const coords = route.geometry.coordinates.map(p => [p[1], p[0]]);
+
+        // Clear old layers
+        if (routeLayer) map.removeLayer(routeLayer);
+        if (startMarker) map.removeLayer(startMarker);
+        if (endMarker) map.removeLayer(endMarker);
+
+        // Draw route
+        routeLayer = L.polyline(coords, { color: 'blue', weight: 5 }).addTo(map);
+        startMarker = L.marker([start.lat, start.lon]).addTo(map).bindPopup("Start: " + start.display).openPopup();
+        endMarker = L.marker([end.lat, end.lon]).addTo(map).bindPopup("End: " + end.display);
+
+        map.fitBounds(routeLayer.getBounds(), { padding: [40, 40] });
+
+        const distanceKm = (route.distance / 1000).toFixed(2);
+        const duration = formatDuration(route.duration);
+
+        info.innerHTML = `
+          <strong>Route Details:</strong><br>
+          <strong>From:</strong> ${start.display}<br>
+          <strong>To:</strong> ${end.display}<br>
+          <strong>Distance:</strong> ${distanceKm} km<br>
+          <strong>Duration:</strong> ${duration}
+        `;
+      } catch (err) {
+        console.error(err);
+        info.innerHTML = "Error: " + err.message;
+        alert("Error: " + err.message);
+      }
+    }
+  </script>
+</body>
+</html>
